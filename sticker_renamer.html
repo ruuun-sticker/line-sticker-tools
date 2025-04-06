@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>LINEスタンプ名前変更ツール</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 1rem; }
+    .grid { display: grid; grid-template-columns: repeat(8, 100px); gap: 10px; justify-content: center; margin-bottom: 1rem; }
+    .cell { border: 2px solid black; width: 100px; height: 100px; position: relative; background: #eee; }
+    .cell.selected { border-color: yellow !important; }
+    .cell.duplicate { border-color: blue; }
+    .cell img { width: 100%; height: 100%; object-fit: contain; }
+    .cell label { position: absolute; bottom: 2px; right: 4px; background: rgba(255,255,255,0.7); font-size: 10px; padding: 1px 3px; border-radius: 3px; }
+    .controls { margin-bottom: 1rem; }
+    .downloads { margin-top: 1rem; }
+    #dropzone, #mainZone, #tabZone {
+      border: 2px dashed #aaa;
+      padding: 1rem;
+      margin: 1rem auto;
+      max-width: 600px;
+      background: #f9f9f9;
+      color: #666;
+      cursor: pointer;
+    }
+    .preview-img {
+      max-width: 100px;
+      height: auto;
+      display: block;
+      margin: 0.5rem auto;
+      border: 1px solid #ccc;
+    }
+    .side-preview {
+      display: flex;
+      justify-content: space-between;
+      max-width: 600px;
+      margin: 0 auto;
+      gap: 20px;
+    }
+    .side-preview div {
+      flex: 1;
+    }
+    .filename-label {
+      font-size: 0.8rem;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>LINEスタンプ名前変更ツール（Web版）</h1>
+  <p><a href="license.html">利用規約</a>に同意の上ご使用ください。</p>
+  <p><a href="help2.html">使い方</a></p>
+  <div class="controls">
+    <button onclick="clearGrid()">オールクリア</button>
+    <button onclick="deleteSelected()">選択削除</button>
+    <button onclick="toggleDigitFormat()" id="formatBtn">保存形式: 01～40</button>
+    <button onclick="downloadZip()">名前変更＆ZIP保存</button>
+  </div>
+
+  <div id="dropzone">ここにスタンプ画像をドラッグ＆ドロップ、またはクリックして読み込み</div>
+  <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
+
+  <div class="grid" id="grid"></div>
+  
+
+  <div class="side-preview">
+    <div>
+      <h4>メイン画像（240×240）</h4>
+      <div id="mainZone">ここに240×240の画像をドラッグ＆ドロップ、またはクリック</div>
+      <input type="file" id="mainInput" accept="image/*" style="display: none;">
+      <img id="mainPreview" class="preview-img" style="display:none;" />
+      <div class="filename-label">main.png</div>
+    </div>
+    <div>
+      <h4>タブ画像（96×74）</h4>
+      <div id="tabZone">ここに96×74の画像をドラッグ＆ドロップ、またはクリック</div>
+      <input type="file" id="tabInput" accept="image/*" style="display: none;">
+      <img id="tabPreview" class="preview-img" style="display:none;" />
+      <div class="filename-label">tab.png</div>
+    </div>
+  </div>
+
+  <div class="downloads" id="downloads"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    const grid = document.getElementById('grid');
+    const fileInput = document.getElementById('fileInput');
+    const formatBtn = document.getElementById('formatBtn');
+    const dropzone = document.getElementById('dropzone');
+    const mainZone = document.getElementById('mainZone');
+    const tabZone = document.getElementById('tabZone');
+    const mainInput = document.getElementById('mainInput');
+    const tabInput = document.getElementById('tabInput');
+    const mainPreview = document.getElementById('mainPreview');
+    const tabPreview = document.getElementById('tabPreview');
+    let useThreeDigits = false;
+    let selectedIndex = null;
+    const cells = Array(40).fill(null);
+    let mainImage = null;
+    let tabImage = null;
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    mainZone.addEventListener('click', () => mainInput.click());
+    tabZone.addEventListener('click', () => tabInput.click());
+
+    function renderGrid() {
+      grid.innerHTML = '';
+      for (let i = 0; i < 40; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.index = i;
+
+        if (cells[i]) {
+          const img = document.createElement('img');
+          img.src = cells[i].url;
+          cell.appendChild(img);
+        }
+        const label = document.createElement('label');
+        label.textContent = `${useThreeDigits ? String(i+1).padStart(3, '0') : String(i+1).padStart(2, '0')}.png`;
+        cell.appendChild(label);
+
+        if (selectedIndex === i) cell.classList.add('selected');
+
+        cell.onclick = () => handleClick(i);
+        grid.appendChild(cell);
+      }
+      updateDuplicates();
+    }
+
+    function handleClick(index) {
+      if (selectedIndex === null) {
+        selectedIndex = index;
+      } else {
+        if (selectedIndex !== index) {
+          [cells[selectedIndex], cells[index]] = [cells[index], cells[selectedIndex]];
+        }
+        selectedIndex = null;
+      }
+      renderGrid();
+    }
+
+    function deleteSelected() {
+      if (selectedIndex !== null) {
+        cells[selectedIndex] = null;
+        selectedIndex = null;
+        renderGrid();
+      }
+    }
+
+    function clearGrid() {
+      for (let i = 0; i < 40; i++) cells[i] = null;
+      selectedIndex = null;
+      renderGrid();
+    }
+
+    function toggleDigitFormat() {
+      useThreeDigits = !useThreeDigits;
+      formatBtn.textContent = `保存形式: ${useThreeDigits ? '001～040' : '01～40'}`;
+      renderGrid();
+    }
+
+    function updateDuplicates() {
+      const seen = {};
+      const allCells = document.querySelectorAll('.cell');
+      for (let i = 0; i < 40; i++) {
+        allCells[i].classList.remove('duplicate');
+        if (cells[i]) {
+          const hash = cells[i].hash;
+          if (seen[hash] !== undefined) {
+            allCells[i].classList.add('duplicate');
+            allCells[seen[hash]].classList.add('duplicate');
+          } else {
+            seen[hash] = i;
+          }
+        }
+        if (i === selectedIndex) {
+          allCells[i].classList.add('selected');
+        }
+      }
+    }
+
+    function downloadZip() {
+      const zip = new JSZip();
+      const pad = useThreeDigits ? 3 : 2;
+      const promises = cells.map((item, i) => {
+        if (!item) return Promise.resolve();
+        return fetch(item.url)
+          .then(res => res.blob())
+          .then(blob => {
+            const ext = item.name.split('.').pop();
+            const filename = `${String(i+1).padStart(pad, '0')}.${ext}`;
+            zip.file(filename, blob);
+          });
+      });
+      Promise.all(promises).then(() => {
+        if (mainImage) zip.file('main.png', mainImage);
+        if (tabImage) zip.file('tab.png', tabImage);
+        zip.generateAsync({type: 'blob'}).then(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'stickers.zip';
+          a.click();
+        });
+      });
+    }
+
+    async function generateImageHash(imgUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 32;
+          canvas.height = 32;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, 32, 32);
+          const data = ctx.getImageData(0, 0, 32, 32).data;
+          const hash = Array.from(data).join(',');
+          resolve(hash);
+        };
+        img.src = imgUrl;
+      });
+    }
+
+    async function handleFiles(files) {
+      const imageFiles = [...files].filter(f => f.type.startsWith('image/')).slice(0, 40);
+      for (const file of imageFiles) {
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          const url = evt.target.result;
+          const hash = await generateImageHash(url);
+          const emptyIndex = cells.findIndex(c => c === null);
+          if (emptyIndex !== -1) {
+            cells[emptyIndex] = { url, name: file.name, hash };
+          } else {
+            alert("40個以上は読み込めません。\n先に削除してください。");
+          }
+          renderGrid();
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function loadImageWithCheck(file, expectedWidth, expectedHeight, callback, previewEl) {
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.onload = () => {
+          if (img.width !== expectedWidth || img.height !== expectedHeight) {
+            alert(`画像サイズが不正です。必要サイズは ${expectedWidth}×${expectedHeight}px です。`);
+          } else {
+            fetch(img.src)
+              .then(res => res.blob())
+              .then(blob => {
+                callback(blob);
+                previewEl.src = URL.createObjectURL(blob);
+                previewEl.style.display = 'block';
+              });
+          }
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    mainInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) loadImageWithCheck(file, 240, 240, b => mainImage = b, mainPreview);
+    });
+    tabInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) loadImageWithCheck(file, 96, 74, b => tabImage = b, tabPreview);
+    });
+
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.background = '#e0f7ff';
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.style.background = '#f9f9f9';
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.style.background = '#f9f9f9';
+      const files = e.dataTransfer.files;
+      handleFiles(files);
+    });
+
+    mainZone.addEventListener('dragover', (e) => e.preventDefault());
+    mainZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file) loadImageWithCheck(file, 240, 240, b => mainImage = b, mainPreview);
+    });
+
+    tabZone.addEventListener('dragover', (e) => e.preventDefault());
+    tabZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file) loadImageWithCheck(file, 96, 74, b => tabImage = b, tabPreview);
+    });
+
+    renderGrid();
+  </script>
+  <footer>
+    © 2025 LINE Sticker Tools by Ruuun
+  </footer>
+</body>
+</html>

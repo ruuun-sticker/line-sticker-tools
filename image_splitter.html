@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>画像分割ツール</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 1rem; }
+    canvas { border: 2px dashed #ccc; cursor: crosshair; margin-top: 1rem; }
+    .downloads { margin-top: 1rem; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+    .thumb {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      padding: 8px;
+      width: 150px;
+    }
+    .thumb img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 6px; }
+    #zip-download, #splitBtn { margin-top: 1rem; display: none; }
+    #dropzone {
+      border: 2px dashed #ccc;
+      padding: 1rem;
+      margin: 1rem auto;
+      max-width: 600px;
+      cursor: pointer;
+      background-color: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <h1>画像分割ツール</h1>
+  <p><a href="license.html">利用規約</a>に同意の上ご利用ください。</p>
+  <input type="file" id="fileInput" accept="image/*" style="display: none;" />
+  <div id="dropzone">ここに画像をドラッグ＆ドロップ、またはクリックして選択</div>
+  <canvas id="canvas" width="400" height="300"></canvas>
+  <p>画像をクリックして分割位置（中心）を指定してください</p>
+  <button id="splitBtn">この位置で分割する</button>
+  <div class="downloads" id="downloads"></div>
+  <a id="zip-download" href="#" download="splits.zip">まとめてZIPでダウンロード</a>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const dropzone = document.getElementById('dropzone');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const downloads = document.getElementById('downloads');
+    const zipLink = document.getElementById('zip-download');
+    const splitBtn = document.getElementById('splitBtn');
+    let image = new Image();
+    let baseName = "image";
+    let splitCoord = null;
+
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    function slugify(str) {
+      return str.normalize("NFKD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-zA-Z0-9-_]/g, "_")
+                .replace(/_+/g, "_")
+                .replace(/^_+|_+$/g, "")
+                .toLowerCase();
+    }
+
+    function drawImageAndSplit(cx = null, cy = null) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0);
+      if (cx !== null && cy !== null) {
+        ctx.strokeStyle = 'red';
+        ctx.beginPath();
+        ctx.moveTo(cx, 0);
+        ctx.lineTo(cx, canvas.height);
+        ctx.moveTo(0, cy);
+        ctx.lineTo(canvas.width, cy);
+        ctx.stroke();
+      }
+    }
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const rawName = file.name.replace(/\.[^/.]+$/, "");
+      baseName = slugify(rawName);
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        image.onload = () => {
+          canvas.width = image.width;
+          canvas.height = image.height;
+          drawImageAndSplit();
+          splitCoord = null;
+          splitBtn.style.display = 'none';
+        };
+        image.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.background = '#eef';
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.style.background = '#f9f9f9';
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.style.background = '#f9f9f9';
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        fileInput.files = e.dataTransfer.files;
+        fileInput.dispatchEvent(new Event('change'));
+      }
+    });
+
+    canvas.addEventListener('click', (e) => {
+      if (!image.src) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor(e.clientX - rect.left);
+      const y = Math.floor(e.clientY - rect.top);
+      splitCoord = { x, y };
+      drawImageAndSplit(x, y);
+      splitBtn.style.display = 'inline-block';
+    });
+
+    function trimAndSquare(imgData) {
+      const canvasTmp = document.createElement('canvas');
+      canvasTmp.width = imgData.width;
+      canvasTmp.height = imgData.height;
+      const ctxTmp = canvasTmp.getContext('2d');
+      ctxTmp.putImageData(imgData, 0, 0);
+      const pixels = ctxTmp.getImageData(0, 0, imgData.width, imgData.height);
+      const data = pixels.data;
+
+      let top = imgData.height, bottom = 0, left = imgData.width, right = 0;
+      for (let y = 0; y < imgData.height; y++) {
+        for (let x = 0; x < imgData.width; x++) {
+          const idx = (y * imgData.width + x) * 4;
+          if (data[idx + 3] > 10) {
+            if (x < left) left = x;
+            if (x > right) right = x;
+            if (y < top) top = y;
+            if (y > bottom) bottom = y;
+          }
+        }
+      }
+      if (left > right || top > bottom) return null;
+
+      const trimmedW = right - left + 1;
+      const trimmedH = bottom - top + 1;
+      const trimmedCanvas = document.createElement('canvas');
+      const size = Math.max(trimmedW, trimmedH);
+      trimmedCanvas.width = trimmedCanvas.height = size;
+      const tctx = trimmedCanvas.getContext('2d');
+      tctx.clearRect(0, 0, size, size);
+      tctx.drawImage(canvasTmp, left, top, trimmedW, trimmedH,
+                    (size - trimmedW) / 2, (size - trimmedH) / 2,
+                    trimmedW, trimmedH);
+
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = finalCanvas.height = 320;
+      finalCanvas.getContext('2d').drawImage(trimmedCanvas, 0, 0, 320, 320);
+      return finalCanvas;
+    }
+
+    function splitImage(cx, cy) {
+      const boxes = [
+        [0, 0, cx, cy, 'left-top'],
+        [cx, 0, image.width, cy, 'right-top'],
+        [0, cy, cx, image.height, 'left-bottom'],
+        [cx, cy, image.width, image.height, 'right-bottom']
+      ];
+      downloads.innerHTML = '';
+      zipLink.style.display = 'none';
+      const zip = new JSZip();
+      let completed = 0;
+      boxes.forEach((box, i) => {
+        const [x0, y0, x1, y1, label] = box;
+        const width = x1 - x0;
+        const height = y1 - y0;
+        const imgData = ctx.getImageData(x0, y0, width, height);
+        const canvasOut = trimAndSquare(imgData);
+        if (canvasOut) {
+          canvasOut.toBlob((blob) => {
+            const filename = `${baseName}_part${i+1}_${label}.png`;
+            zip.file(filename, blob);
+
+            const url = URL.createObjectURL(blob);
+            const thumbDiv = document.createElement('div');
+            thumbDiv.className = 'thumb';
+            const img = document.createElement('img');
+            img.src = url;
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.textContent = `${label.replace('-', ' ')} をダウンロード`;
+            thumbDiv.appendChild(img);
+            thumbDiv.appendChild(link);
+            downloads.appendChild(thumbDiv);
+
+            completed++;
+            if (completed === boxes.length) {
+              zip.generateAsync({type: 'blob'}).then((zipBlob) => {
+                const zipUrl = URL.createObjectURL(zipBlob);
+                zipLink.href = zipUrl;
+                zipLink.download = `${baseName}_splits.zip`;
+                zipLink.style.display = 'inline-block';
+              });
+            }
+          });
+        }
+      });
+    }
+
+    splitBtn.addEventListener('click', () => {
+      if (splitCoord) splitImage(splitCoord.x, splitCoord.y);
+    });
+  </script>
+  <footer>
+    © 2025 LINE Sticker Tools by Ruuun
+  </footer>
+</body>
+</html>

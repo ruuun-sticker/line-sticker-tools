@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>LINEスタンプ メイン・タブ画像作成ツール</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 2rem; }
+    canvas { border: 1px solid #ccc; margin: 1rem; }
+    .preview { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+    button, input[type=range] { margin: 0.5rem; padding: 0.5rem 1rem; font-size: 1rem; }
+    #dropzone {
+      border: 2px dashed #aaa;
+      padding: 1rem;
+      margin: 1rem auto;
+      max-width: 600px;
+      background: #f9f9f9;
+      color: #666;
+} 	cursor: pointer; 
+    }
+  </style>
+</head>
+<body>
+  <h1>LINEスタンプ メイン・タブ画像作成ツール</h1>
+  <p><a href="license.html">利用規約</a>に同意の上ご利用ください。</p>
+  <p>1枚の画像から240×240（メイン）と96×74（タブ）を生成します</p>
+  <input type="file" id="fileInput" accept="image/*" style="display: none;">
+  <div id="dropzone">ここに画像をドラッグ＆ドロップ、またはクリックして読み込み</div>
+  <p>🎍あけおめフレーム画像（240×240 PNG）を読み込む：<input type="file" id="frameInput" accept="image/png"></p>
+  <div id="scaleControl" style="display:none;">
+    <label for="scaleRange">🖼 メイン画像の縮小率: <span id="scaleLabel">90</span>%</label><br>
+    <input type="range" id="scaleRange" min="80" max="100" value="90">
+  </div>
+
+  <div class="preview">
+    <div>
+      <h3>240×240 メイン画像</h3>
+      <canvas id="mainCanvas" width="240" height="240"></canvas>
+    </div>
+    <div>
+      <h3>96×96 タブ元画像</h3>
+      <canvas id="tabPreview" width="96" height="96"></canvas>
+      <div>
+        <button id="toggleMode">タブ画像モード: トリミング</button>
+      </div>
+      <h3>96×74 タブ画像</h3>
+      <canvas id="tabCanvas" width="96" height="74"></canvas>
+    </div>
+  </div>
+  <button id="downloadBtn">ZIPでダウンロード</button>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const frameInput = document.getElementById('frameInput');
+    const dropzone = document.getElementById('dropzone');
+    const mainCanvas = document.getElementById('mainCanvas');
+    const mainCtx = mainCanvas.getContext('2d');
+    const tabPreview = document.getElementById('tabPreview');
+    const tabCtx = tabPreview.getContext('2d');
+    const tabCanvas = document.getElementById('tabCanvas');
+    const tabOutCtx = tabCanvas.getContext('2d');
+    const toggleBtn = document.getElementById('toggleMode');
+    const scaleRange = document.getElementById('scaleRange');
+    const scaleLabel = document.getElementById('scaleLabel');
+    const scaleControl = document.getElementById('scaleControl');
+
+    let tabCropY = 0;
+    let resizedTabImage = null;
+    let mode = 'crop'; // crop or pad
+    let squareCanvas = null;
+    let frameImage = null;
+    let scalePercent = 90;
+
+    function makeSquareImage(img) {
+      const size = Math.max(img.width, img.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(
+        img,
+        (size - img.width) / 2,
+        (size - img.height) / 2,
+        img.width,
+        img.height
+      );
+      return canvas;
+    }
+
+    function updateMainCanvas() {
+      mainCtx.clearRect(0, 0, 240, 240);
+      if (squareCanvas) {
+        const scale = scalePercent / 100;
+        const size = 240 * scale;
+        const offset = (240 - size) / 2;
+        mainCtx.drawImage(squareCanvas, offset, offset, size, size);
+      }
+      if (frameImage) {
+        mainCtx.drawImage(frameImage, 0, 0, 240, 240);
+      }
+    }
+
+    function loadImageFromFile(file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const img = new Image();
+        img.onload = () => {
+          squareCanvas = makeSquareImage(img);
+          updateMainCanvas();
+
+          const tmpCanvas = document.createElement('canvas');
+          tmpCanvas.width = 96;
+          tmpCanvas.height = 96;
+          const tmpCtx = tmpCanvas.getContext('2d');
+          tmpCtx.drawImage(squareCanvas, 0, 0, 96, 96);
+
+          resizedTabImage = new Image();
+          resizedTabImage.onload = () => drawTabPreview();
+          resizedTabImage.src = tmpCanvas.toDataURL();
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function drawTabPreview() {
+      tabCtx.clearRect(0, 0, 96, 96);
+      tabCtx.drawImage(resizedTabImage, 0, 0);
+
+      tabOutCtx.clearRect(0, 0, 96, 74);
+
+      if (mode === 'crop') {
+        tabCtx.strokeStyle = 'red';
+        tabCtx.lineWidth = 2;
+        tabCtx.strokeRect(0, tabCropY, 96, 74);
+        tabOutCtx.drawImage(resizedTabImage, 0, tabCropY, 96, 74, 0, 0, 96, 74);
+      } else if (mode === 'pad') {
+        const paddedCanvas = document.createElement('canvas');
+        paddedCanvas.width = 96;
+        paddedCanvas.height = 74;
+        const pctx = paddedCanvas.getContext('2d');
+        const scale = 74 / 96;
+        const newWidth = Math.floor(96 * scale);
+        const offsetX = Math.floor((96 - newWidth) / 2);
+        pctx.clearRect(0, 0, 96, 74);
+        pctx.drawImage(resizedTabImage, offsetX, 0, newWidth, 74);
+        tabOutCtx.drawImage(paddedCanvas, 0, 0);
+      }
+    }
+
+    tabPreview.addEventListener('click', (e) => {
+      if (mode !== 'crop') return;
+      const rect = tabPreview.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      tabCropY = Math.max(0, Math.min(96 - 74, Math.floor(y - 74/2)));
+      drawTabPreview();
+    });
+
+    toggleBtn.addEventListener('click', () => {
+      mode = mode === 'crop' ? 'pad' : 'crop';
+      toggleBtn.textContent = `タブ画像モード: ${mode === 'crop' ? 'トリミング' : '余白追加'}`;
+      drawTabPreview();
+    });
+
+    scaleRange.addEventListener('input', () => {
+      scalePercent = parseInt(scaleRange.value);
+      scaleLabel.textContent = scalePercent;
+      updateMainCanvas();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files[0]) loadImageFromFile(e.target.files[0]);
+    });
+
+    frameInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const img = new Image();
+        img.onload = () => {
+          frameImage = img;
+          scaleControl.style.display = 'block';
+          updateMainCanvas();
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    dropzone.addEventListener('click', () => fileInput.click());
+	
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.background = '#e0f7ff';
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.style.background = '#f9f9f9';
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.style.background = '#f9f9f9';
+      const file = e.dataTransfer.files[0];
+      if (file) loadImageFromFile(file);
+    });
+
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      const zip = new JSZip();
+      zip.file('main.png', mainCanvas.toDataURL('image/png').split(',')[1], {base64: true});
+      zip.file('tab.png', tabCanvas.toDataURL('image/png').split(',')[1], {base64: true});
+      zip.generateAsync({type: 'blob'}).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'line_images.zip';
+        a.click();
+      });
+    });
+  </script>
+  <footer>
+    © 2025 LINE Sticker Tools by Ruuun
+  </footer>
+</body>
+</html>
