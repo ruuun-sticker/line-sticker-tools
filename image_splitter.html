@@ -6,7 +6,9 @@
   <title>画像分割ツール</title>
   <style>
     body { font-family: sans-serif; text-align: center; padding: 1rem; }
-    canvas { border: 2px dashed #ccc; cursor: crosshair; margin-top: 1rem; }
+    canvas { border: 2px dashed #ccc; cursor: crosshair; margin-top: 1rem;
+      max-width: 100%;
+      height: auto; }
     .downloads { margin-top: 1rem; display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
     .thumb {
       display: flex;
@@ -115,13 +117,17 @@
     });
 
     canvas.addEventListener('click', (e) => {
-      if (!image.src) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = Math.floor(e.clientX - rect.left);
-      const y = Math.floor(e.clientY - rect.top);
-      splitCoord = { x, y };
-      drawImageAndSplit(x, y);
-      splitBtn.style.display = 'inline-block';
+  if (!image.src) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  const x = Math.floor((e.clientX - rect.left) * scaleX);
+  const y = Math.floor((e.clientY - rect.top) * scaleY);
+
+  splitCoord = { x, y };
+  drawImageAndSplit(x, y);
+  splitBtn.style.display = 'inline-block';
     });
 
     function trimAndSquare(imgData) {
@@ -194,7 +200,7 @@
             const link = document.createElement('a');
             link.href = url;
             link.download = filename;
-            link.textContent = `${label.replace('-', ' ')} をダウンロード`;
+            link.textContent = `ダウンロード`;
             thumbDiv.appendChild(img);
             thumbDiv.appendChild(link);
             downloads.appendChild(thumbDiv);
