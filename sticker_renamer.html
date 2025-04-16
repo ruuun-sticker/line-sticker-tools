@@ -51,6 +51,11 @@
   <p><a href="license.html">利用規約</a>に同意の上ご使用ください。</p>
   <p><a href="sticker_renamer_help.html">使い方</a></p>
   <div class="controls">
+  <select id="resizeMode">
+    <option value="none">リサイズなし</option>
+    <option value="normal">通常サイズ（370×320）</option>
+    <option value="big">BIGサイズ（396×660）</option>
+  </select>
     <button onclick="clearGrid()">オールクリア</button>
     <button onclick="deleteSelected()">選択削除</button>
     <button onclick="toggleDigitFormat()" id="formatBtn">保存形式: 01～40</button>
@@ -104,6 +109,28 @@
     mainZone.addEventListener('click', () => mainInput.click());
     tabZone.addEventListener('click', () => tabInput.click());
 
+  function resizeToFit(img, maxW, maxH) {
+    const aspect = img.width / img.height;
+    let w = maxW;
+    let h = Math.round(w / aspect);
+
+    if (h > maxH) {
+      h = maxH;
+      w = Math.round(h * aspect);
+    }
+
+    if (w % 2 !== 0) w += 1;
+    if (h % 2 !== 0) h += 1;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas;
+  }
+  
     function renderGrid() {
       grid.innerHTML = '';
       for (let i = 0; i < 40; i++) {
@@ -186,12 +213,43 @@
       const promises = cells.map((item, i) => {
         if (!item) return Promise.resolve();
         return fetch(item.url)
-          .then(res => res.blob())
-          .then(blob => {
-            const ext = item.name.split('.').pop();
-            const filename = `${String(i+1).padStart(pad, '0')}.${ext}`;
-            zip.file(filename, blob);
-          });
+  .then(res => res.blob())
+  .then(blob => {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const mode = document.getElementById('resizeMode').value;
+        let canvas = document.createElement('canvas');
+        let ctx = canvas.getContext('2d');
+        let w = img.width;
+        let h = img.height;
+
+        if (mode !== 'none') {
+          const [maxW, maxH] = mode === 'normal' ? [370, 320] : [396, 660];
+          const aspect = w / h;
+          w = maxW;
+          h = Math.round(w / aspect);
+          if (h > maxH) {
+            h = maxH;
+            w = Math.round(h * aspect);
+          }
+          if (w % 2 !== 0) w += 1;
+          if (h % 2 !== 0) h += 1;
+        }
+
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob => {
+          const ext = item.name.split('.').pop();
+          const filename = `${String(i+1).padStart(pad, '0')}.${ext}`;
+          zip.file(filename, blob);
+          resolve();
+        });
+      };
+      img.src = URL.createObjectURL(blob);
+    });
+  });
       });
       Promise.all(promises).then(() => {
         if (mainImage) zip.file('main.png', mainImage);
