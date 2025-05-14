@@ -91,7 +91,7 @@
     function updateMainCanvas() {
       mainCtx.clearRect(0, 0, 240, 240);
       if (squareCanvas) {
-        const scale = frameImage ? scalePercent / 100;
+        const scale = frameImage ? scalePercent / 100 : 1;
         const size = 240 * scale;
         const offset = (240 - size) / 2;
         mainCtx.drawImage(squareCanvas, offset, offset, size, size);
